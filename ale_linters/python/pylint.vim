@@ -10,19 +10,7 @@ let g:ale_python_pylint_options =
 let g:ale_python_pylint_use_global = get(g:, 'ale_python_pylint_use_global', 0)
 
 function! ale_linters#python#pylint#GetExecutable(buffer) abort
-    if !ale#Var(a:buffer, 'python_pylint_use_global')
-        let l:virtualenv = ale#python#FindVirtualenv(a:buffer)
-
-        if !empty(l:virtualenv)
-            let l:ve_pylint = l:virtualenv . '/bin/pylint'
-
-            if executable(l:ve_pylint)
-                return l:ve_pylint
-            endif
-        endif
-    endif
-
-    return ale#Var(a:buffer, 'python_pylint_executable')
+    return ale#python#FindExecutable(a:buffer, 'python_pylint', ['pylint'])
 endfunction
 
 function! ale_linters#python#pylint#GetCommand(buffer) abort
@@ -36,20 +24,20 @@ function! ale_linters#python#pylint#Handle(buffer, lines) abort
     " Matches patterns like the following:
     "
     " test.py:4:4: W0101 (unreachable) Unreachable code
-    let l:pattern = '\v^[^:]+:(\d+):(\d+): ([[:alnum:]]+) \((.*)\) (.*)$'
+    let l:pattern = '\v^[^:]+:(\d+):(\d+): ([[:alnum:]]+) \(([^(]*)\) (.*)$'
     let l:output = []
 
     for l:match in ale#util#GetMatches(a:lines, l:pattern)
         "let l:failed = append(0, l:match)
         let l:code = l:match[3]
 
-        if (l:code ==# 'C0303')
+        if (l:code is# 'C0303')
         \ && !ale#Var(a:buffer, 'warn_about_trailing_whitespace')
             " Skip warnings for trailing whitespace if the option is off.
             continue
         endif
 
-        if l:code ==# 'I0011'
+        if l:code is# 'I0011'
             " Skip 'Locally disabling' message
              continue
         endif
@@ -57,8 +45,8 @@ function! ale_linters#python#pylint#Handle(buffer, lines) abort
         call add(l:output, {
         \   'lnum': l:match[1] + 0,
         \   'col': l:match[2] + 1,
-        \   'text': l:code . ': ' . l:match[5],
-        \   'type': l:code[:0] ==# 'E' ? 'E' : 'W',
+        \   'text': l:code . ': ' . l:match[5] . ' (' . l:match[4] . ')',
+        \   'type': l:code[:0] is# 'E' ? 'E' : 'W',
         \})
     endfor
 

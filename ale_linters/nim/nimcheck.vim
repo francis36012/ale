@@ -12,7 +12,7 @@ function! ale_linters#nim#nimcheck#Handle(buffer, lines) abort
         "       module names.
 
         let l:temp_buffer_filename = fnamemodify(l:match[1], ':p:t')
-        if l:buffer_filename !=# '' && l:temp_buffer_filename !=# l:buffer_filename
+        if l:buffer_filename isnot# '' && l:temp_buffer_filename isnot# l:buffer_filename
             continue
         endif
 
@@ -26,7 +26,7 @@ function! ale_linters#nim#nimcheck#Handle(buffer, lines) abort
 
         if len(l:textmatch) > 0
             let l:errortype = l:textmatch[1]
-            if l:errortype ==# 'Error'
+            if l:errortype is# 'Error'
                 let l:type = 'E'
             endif
         endif
@@ -44,10 +44,7 @@ endfunction
 
 
 function! ale_linters#nim#nimcheck#GetCommand(buffer) abort
-    let l:directory = ale#Escape(fnamemodify(bufname(a:buffer), ':p:h'))
-
-    return 'nim check --path:' . l:directory
-    \   . ' --threads:on --verbosity:0 --colors:off --listFullPaths %t'
+    return 'nim check --verbosity:0 --colors:off --listFullPaths %s'
 endfunction
 
 
@@ -56,5 +53,6 @@ call ale#linter#Define('nim', {
 \    'executable': 'nim',
 \    'output_stream': 'both',
 \    'command_callback': 'ale_linters#nim#nimcheck#GetCommand',
-\    'callback': 'ale_linters#nim#nimcheck#Handle'
+\    'callback': 'ale_linters#nim#nimcheck#Handle',
+\    'lint_file': 1,
 \})

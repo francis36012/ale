@@ -25,6 +25,7 @@ let s:default_ale_linters = {
 \   'csh': ['shell'],
 \   'go': ['gofmt', 'golint', 'go vet'],
 \   'help': [],
+\   'python': ['flake8', 'mypy', 'pylint'],
 \   'rust': ['cargo'],
 \   'spec': [],
 \   'text': [],
@@ -50,19 +51,38 @@ function! ale#linter#PreProcess(linter) abort
     endif
 
     let l:obj = {
+    \   'add_newline': get(a:linter, 'add_newline', 0),
     \   'name': get(a:linter, 'name'),
-    \   'callback': get(a:linter, 'callback'),
+    \   'lsp': get(a:linter, 'lsp', ''),
     \}
 
     if type(l:obj.name) != type('')
         throw '`name` must be defined to name the linter'
     endif
 
-    if !s:IsCallback(l:obj.callback)
-        throw '`callback` must be defined with a callback to accept output'
+    let l:needs_address = l:obj.lsp is# 'socket'
+    let l:needs_executable = l:obj.lsp isnot# 'socket'
+    let l:needs_command = l:obj.lsp isnot# 'socket'
+    let l:needs_lsp_details = !empty(l:obj.lsp)
+
+    if empty(l:obj.lsp)
+        let l:obj.callback = get(a:linter, 'callback')
+
+        if !s:IsCallback(l:obj.callback)
+            throw '`callback` must be defined with a callback to accept output'
+        endif
     endif
 
-    if has_key(a:linter, 'executable_callback')
+    if index(['', 'socket', 'stdio', 'tsserver'], l:obj.lsp) < 0
+        throw '`lsp` must be either `''lsp''` or `''tsserver''` if defined'
+    endif
+
+    if !l:needs_executable
+        if has_key(a:linter, 'executable')
+        \|| has_key(a:linter, 'executable_callback')
+            throw '`executable` and `executable_callback` cannot be used when lsp == ''socket'''
+        endif
+    elseif has_key(a:linter, 'executable_callback')
         let l:obj.executable_callback = a:linter.executable_callback
 
         if !s:IsCallback(l:obj.executable_callback)
@@ -78,7 +98,13 @@ function! ale#linter#PreProcess(linter) abort
         throw 'Either `executable` or `executable_callback` must be defined'
     endif
 
-    if has_key(a:linter, 'command_chain')
+    if !l:needs_command
+        if has_key(a:linter, 'command')
+        \|| has_key(a:linter, 'command_callback')
+        \|| has_key(a:linter, 'command_chain')
+            throw '`command` and `command_callback` and `command_chain` cannot be used when lsp == ''socket'''
+        endif
+    elseif has_key(a:linter, 'command_chain')
         let l:obj.command_chain = a:linter.command_chain
 
         if type(l:obj.command_chain) != type([])
@@ -136,6 +162,34 @@ function! ale#linter#PreProcess(linter) abort
     \) > 1
         throw 'Only one of `command`, `command_callback`, or `command_chain` '
         \   . 'should be set'
+    endif
+
+    if !l:needs_address
+        if has_key(a:linter, 'address_callback')
+            throw '`address_callback` cannot be used when lsp != ''socket'''
+        endif
+    elseif has_key(a:linter, 'address_callback')
+        let l:obj.address_callback = a:linter.address_callback
+
+        if !s:IsCallback(l:obj.address_callback)
+            throw '`address_callback` must be a callback if defined'
+        endif
+    else
+        throw '`address_callback` must be defined for getting the LSP address'
+    endif
+
+    if l:needs_lsp_details
+        let l:obj.language_callback = get(a:linter, 'language_callback')
+
+        if !s:IsCallback(l:obj.language_callback)
+            throw '`language_callback` must be a callback for LSP linters'
+        endif
+
+        let l:obj.project_root_callback = get(a:linter, 'project_root_callback')
+
+        if !s:IsCallback(l:obj.project_root_callback)
+            throw '`project_root_callback` must be a callback for LSP linters'
+        endif
     endif
 
     let l:obj.output_stream = get(a:linter, 'output_stream', 'stdout')
@@ -249,7 +303,7 @@ function! s:GetLinterNames(original_filetype) abort
 endfunction
 
 function! ale#linter#Get(original_filetypes) abort
-    let l:combined_linters = []
+    let l:possibly_duplicated_linters = []
 
     " Handle dot-seperated filetypes.
     for l:original_filetype in split(a:original_filetypes, '\.')
@@ -258,7 +312,7 @@ function! ale#linter#Get(original_filetypes) abort
         let l:all_linters = ale#linter#GetAll(l:filetype)
         let l:filetype_linters = []
 
-        if type(l:linter_names) == type('') && l:linter_names ==# 'all'
+        if type(l:linter_names) == type('') && l:linter_names is# 'all'
             let l:filetype_linters = l:all_linters
         elseif type(l:linter_names) == type([])
             " Select only the linters we or the user has specified.
@@ -274,8 +328,112 @@ function! ale#linter#Get(original_filetypes) abort
             endfor
         endif
 
-        call extend(l:combined_linters, l:filetype_linters)
+        call extend(l:possibly_duplicated_linters, l:filetype_linters)
     endfor
 
-    return l:combined_linters
+    let l:name_list = []
+    let l:combined_linters = []
+
+    " Make sure we override linters so we don't get two with the same name,
+    " like 'eslint' for both 'javascript' and 'typescript'
+    "
+    " Note that the reverse calls here modify the List variables.
+    for l:linter in reverse(l:possibly_duplicated_linters)
+        if index(l:name_list, l:linter.name) < 0
+            call add(l:name_list, l:linter.name)
+            call add(l:combined_linters, l:linter)
+        endif
+    endfor
+
+    return reverse(l:combined_linters)
+endfunction
+
+" Given a buffer and linter, get the executable String for the linter.
+function! ale#linter#GetExecutable(buffer, linter) abort
+    return has_key(a:linter, 'executable_callback')
+    \   ? ale#util#GetFunction(a:linter.executable_callback)(a:buffer)
+    \   : a:linter.executable
+endfunction
+
+" Given a buffer and linter, get the command String for the linter.
+" The command_chain key is not supported.
+function! ale#linter#GetCommand(buffer, linter) abort
+    return has_key(a:linter, 'command_callback')
+    \   ? ale#util#GetFunction(a:linter.command_callback)(a:buffer)
+    \   : a:linter.command
+endfunction
+
+" Given a buffer and linter, get the address for connecting to the server.
+function! ale#linter#GetAddress(buffer, linter) abort
+    return has_key(a:linter, 'address_callback')
+    \   ? ale#util#GetFunction(a:linter.address_callback)(a:buffer)
+    \   : a:linter.address
+endfunction
+
+" Given a buffer, an LSP linter, and a callback to register for handling
+" messages, start up an LSP linter and get ready to receive errors or
+" completions.
+function! ale#linter#StartLSP(buffer, linter, callback) abort
+    let l:command = ''
+    let l:address = ''
+    let l:root = ale#util#GetFunction(a:linter.project_root_callback)(a:buffer)
+
+    if empty(l:root) && a:linter.lsp isnot# 'tsserver'
+        " If there's no project root, then we can't check files with LSP,
+        " unless we are using tsserver, which doesn't use project roots.
+        return {}
+    endif
+
+    if a:linter.lsp is# 'socket'
+        let l:address = ale#linter#GetAddress(a:buffer, a:linter)
+        let l:conn_id = ale#lsp#ConnectToAddress(
+        \   l:address,
+        \   l:root,
+        \   a:callback,
+        \)
+    else
+        let l:executable = ale#linter#GetExecutable(a:buffer, a:linter)
+
+        if !executable(l:executable)
+            return {}
+        endif
+
+        let l:command = ale#job#PrepareCommand(
+        \   ale#linter#GetCommand(a:buffer, a:linter),
+        \)
+        let l:conn_id = ale#lsp#StartProgram(
+        \   l:executable,
+        \   l:command,
+        \   l:root,
+        \   a:callback,
+        \)
+    endif
+
+    let l:language_id = ale#util#GetFunction(a:linter.language_callback)(a:buffer)
+
+    if !l:conn_id
+        if g:ale_history_enabled && !empty(l:command)
+            call ale#history#Add(a:buffer, 'failed', l:conn_id, l:command)
+        endif
+
+        return {}
+    endif
+
+    if ale#lsp#OpenDocumentIfNeeded(l:conn_id, a:buffer, l:root, l:language_id)
+        if g:ale_history_enabled && !empty(l:command)
+            call ale#history#Add(a:buffer, 'started', l:conn_id, l:command)
+        endif
+    endif
+
+    " The change message needs to be sent for tsserver before doing anything.
+    if a:linter.lsp is# 'tsserver'
+        call ale#lsp#Send(l:conn_id, ale#lsp#tsserver_message#Change(a:buffer))
+    endif
+
+    return {
+    \   'connection_id': l:conn_id,
+    \   'command': l:command,
+    \   'project_root': l:root,
+    \   'language_id': l:language_id,
+    \}
 endfunction

@@ -17,20 +17,33 @@ function! ale_linters#perl#perl#GetCommand(buffer) abort
     \   . ' %t'
 endfunction
 
+let s:begin_failed_skip_pattern = '\v' . join([
+\   '^Compilation failed in require',
+\   '^Can''t locate',
+\], '|')
+
 function! ale_linters#perl#perl#Handle(buffer, lines) abort
     let l:pattern = '\(.\+\) at \(.\+\) line \(\d\+\)'
     let l:output = []
+    let l:basename = expand('#' . a:buffer . ':t')
 
     for l:match in ale#util#GetMatches(a:lines, l:pattern)
         let l:line = l:match[3]
         let l:text = l:match[1]
         let l:type = 'E'
 
-        call add(l:output, {
-        \   'lnum': l:line,
-        \   'text': l:text,
-        \   'type': l:type,
-        \})
+        if ale#path#IsBufferPath(a:buffer, l:match[2])
+        \ && (
+        \   l:text isnot# 'BEGIN failed--compilation aborted'
+        \   || empty(l:output)
+        \   || match(l:output[-1].text, s:begin_failed_skip_pattern) < 0
+        \ )
+            call add(l:output, {
+            \   'lnum': l:line,
+            \   'text': l:text,
+            \   'type': l:type,
+            \})
+        endif
     endfor
 
     return l:output

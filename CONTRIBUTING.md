@@ -74,10 +74,10 @@ If you want to credit multiple authors, you can comma separate them.
 ### 3.i. Adding a New Linter
 
 If you add a new linter, look for existing handlers first in the
-[handlers.vim](autoload/ale/handlers.vim) file. One of the handlers there may
+[handlers](autoload/ale/handlers) directory. One of the handlers there may
 already be able to handle your lines of output. If you find that your new
 linter replicates an existing error handler, consider pulling it up into the
-[handlers.vim](autoload/ale/handlers.vim) file, and use the generic handler in
+[handlers](autoload/ale/handlers) directory, and use the generic handler in
 both places.
 
 When you add a linter, make sure the language for the linter and the linter
@@ -160,7 +160,7 @@ to look up the default value easily by typing `:echo g:ale_...`.
 Should the principal author of the ALE project and all collaborators with the
 required access needed to properly administrate the project on GitHub or any
 other website either perish or disappear, whether by tragic traffic accident
-or government adduction, etc., action should be taken to ensure that the
+or government abduction, etc., action should be taken to ensure that the
 project continues. If no one is left to administer the project where it is
 hosted, please fork the project and nominate someone capable to administer it.
 Preferably, in such an event, a single fork of the project will replace the

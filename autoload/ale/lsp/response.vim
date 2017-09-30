@@ -8,14 +8,13 @@ let s:SEVERITY_INFORMATION = 3
 let s:SEVERITY_HINT = 4
 
 " Parse the message for textDocument/publishDiagnostics
-function! ale#lsp#response#ReadDiagnostics(params) abort
-    let l:filename = a:params.uri
+function! ale#lsp#response#ReadDiagnostics(response) abort
     let l:loclist = []
 
-    for l:diagnostic in a:params.diagnostics
+    for l:diagnostic in a:response.params.diagnostics
         let l:severity = get(l:diagnostic, 'severity', 0)
         let l:loclist_item = {
-        \   'message': l:diagnostic.message,
+        \   'text': l:diagnostic.message,
         \   'type': 'E',
         \   'lnum': l:diagnostic.range.start.line + 1,
         \   'col': l:diagnostic.range.start.character + 1,
@@ -40,5 +39,28 @@ function! ale#lsp#response#ReadDiagnostics(params) abort
         call add(l:loclist, l:loclist_item)
     endfor
 
-    return [l:filename, l:loclist]
+    return l:loclist
+endfunction
+
+function! ale#lsp#response#ReadTSServerDiagnostics(response) abort
+    let l:loclist = []
+
+    for l:diagnostic in a:response.body.diagnostics
+        let l:loclist_item = {
+        \   'text': l:diagnostic.text,
+        \   'type': 'E',
+        \   'lnum': l:diagnostic.start.line,
+        \   'col': l:diagnostic.start.offset,
+        \   'end_lnum': l:diagnostic.end.line,
+        \   'end_col': l:diagnostic.end.offset,
+        \}
+
+        if has_key(l:diagnostic, 'code')
+            let l:loclist_item.nr = l:diagnostic.code
+        endif
+
+        call add(l:loclist, l:loclist_item)
+    endfor
+
+    return l:loclist
 endfunction

@@ -22,19 +22,20 @@ function! ale#statusline#Update(buffer, loclist) abort
         return
     endif
 
+    let l:loclist = filter(copy(a:loclist), 'v:val.bufnr == a:buffer')
     let l:count = s:CreateCountDict()
-    let l:count.total = len(a:loclist)
+    let l:count.total = len(l:loclist)
 
-    for l:entry in a:loclist
-        if l:entry.type ==# 'W'
-            if get(l:entry, 'sub_type', '') ==# 'style'
+    for l:entry in l:loclist
+        if l:entry.type is# 'W'
+            if get(l:entry, 'sub_type', '') is# 'style'
                 let l:count.style_warning += 1
             else
                 let l:count.warning += 1
             endif
-        elseif l:entry.type ==# 'I'
+        elseif l:entry.type is# 'I'
             let l:count.info += 1
-        elseif get(l:entry, 'sub_type', '') ==# 'style'
+        elseif get(l:entry, 'sub_type', '') is# 'style'
             let l:count.style_error += 1
         else
             let l:count.error += 1
@@ -50,14 +51,14 @@ endfunction
 
 " Get the counts for the buffer, and update the counts if needed.
 function! s:GetCounts(buffer) abort
-if !exists('g:ale_buffer_info') || !has_key(g:ale_buffer_info, a:buffer)
-    return s:CreateCountDict()
-endif
+    if !exists('g:ale_buffer_info') || !has_key(g:ale_buffer_info, a:buffer)
+        return s:CreateCountDict()
+    endif
 
-" Cache is cold, so manually ask for an update.
-if !has_key(g:ale_buffer_info[a:buffer], 'count')
-    call ale#statusline#Update(a:buffer, g:ale_buffer_info[a:buffer].loclist)
-endif
+    " Cache is cold, so manually ask for an update.
+    if !has_key(g:ale_buffer_info[a:buffer], 'count')
+        call ale#statusline#Update(a:buffer, g:ale_buffer_info[a:buffer].loclist)
+    endif
 
     return g:ale_buffer_info[a:buffer].count
 endfunction

@@ -55,7 +55,13 @@ let g:ale_buffer_info = {}
 
 " This option prevents ALE autocmd commands from being run for particular
 " filetypes which can cause issues.
-let g:ale_filetype_blacklist = ['nerdtree', 'unite', 'tags']
+let g:ale_filetype_blacklist = [
+\   'dirvish',
+\   'nerdtree',
+\   'qf',
+\   'tags',
+\   'unite',
+\]
 
 " This Dictionary configures which linters are enabled for which languages.
 let g:ale_linters = get(g:, 'ale_linters', {})
@@ -167,7 +173,7 @@ let g:ale_max_buffer_history_size = get(g:, 'ale_max_buffer_history_size', 20)
 let g:ale_history_enabled = get(g:, 'ale_history_enabled', 1)
 
 " A flag for storing the full output of commands in the history.
-let g:ale_history_log_output = get(g:, 'ale_history_log_output', 0)
+let g:ale_history_log_output = get(g:, 'ale_history_log_output', 1)
 
 " A dictionary mapping regular expression patterns to arbitrary buffer
 " variables to be set. Useful for configuration ALE based on filename
@@ -177,6 +183,14 @@ call ale#Set('pattern_options_enabled', !empty(g:ale_pattern_options))
 
 " A maximum file size for checking for errors.
 call ale#Set('maximum_file_size', 0)
+
+" Remapping of linter problems.
+call ale#Set('type_map', {})
+
+" Enable automatic completion with LSP servers and tsserver
+call ale#Set('completion_enabled', 0)
+call ale#Set('completion_delay', 100)
+call ale#Set('completion_max_suggestions', 50)
 
 function! ALEInitAuGroups() abort
     " This value used to be a Boolean as a Number, and is now a String.
@@ -192,11 +206,11 @@ function! ALEInitAuGroups() abort
     augroup ALERunOnTextChangedGroup
         autocmd!
         if g:ale_enabled
-            if l:text_changed ==? 'always' || l:text_changed ==# '1'
+            if l:text_changed is? 'always' || l:text_changed is# '1'
                 autocmd TextChanged,TextChangedI * call ale#Queue(g:ale_lint_delay)
-            elseif l:text_changed ==? 'normal'
+            elseif l:text_changed is? 'normal'
                 autocmd TextChanged * call ale#Queue(g:ale_lint_delay)
-            elseif l:text_changed ==? 'insert'
+            elseif l:text_changed is? 'insert'
                 autocmd TextChangedI * call ale#Queue(g:ale_lint_delay)
             endif
         endif
@@ -204,37 +218,40 @@ function! ALEInitAuGroups() abort
 
     augroup ALERunOnEnterGroup
         autocmd!
+        if g:ale_enabled
+            " Handle everything that needs to happen when buffers are entered.
+            autocmd BufEnter * call ale#events#EnterEvent(str2nr(expand('<abuf>')))
+        endif
         if g:ale_enabled && g:ale_lint_on_enter
-            autocmd BufEnter,BufRead * call ale#Queue(300, 'lint_file')
+            autocmd BufWinEnter,BufRead * call ale#Queue(0, 'lint_file', str2nr(expand('<abuf>')))
+            " Track when the file is changed outside of Vim.
+            autocmd FileChangedShellPost * call ale#events#FileChangedEvent(str2nr(expand('<abuf>')))
         endif
     augroup END
 
     augroup ALERunOnFiletypeChangeGroup
         autocmd!
         if g:ale_enabled && g:ale_lint_on_filetype_changed
-            " Set the filetype after a buffer is opened or read.
-            autocmd BufEnter,BufRead * let b:ale_original_filetype = &filetype
             " Only start linting if the FileType actually changes after
             " opening a buffer. The FileType will fire when buffers are opened.
-            autocmd FileType *
-            \   if has_key(b:, 'ale_original_filetype')
-            \   && b:ale_original_filetype !=# expand('<amatch>')
-            \|      call ale#Queue(300, 'lint_file')
-            \|  endif
+            autocmd FileType * call ale#events#FileTypeEvent(
+            \   str2nr(expand('<abuf>')),
+            \   expand('<amatch>')
+            \)
         endif
     augroup END
 
     augroup ALERunOnSaveGroup
         autocmd!
         if (g:ale_enabled && g:ale_lint_on_save) || g:ale_fix_on_save
-            autocmd BufWrite * call ale#events#SaveEvent()
+            autocmd BufWritePost * call ale#events#SaveEvent(str2nr(expand('<abuf>')))
         endif
     augroup END
 
     augroup ALERunOnInsertLeave
         autocmd!
         if g:ale_enabled && g:ale_lint_on_insert_leave
-            autocmd InsertLeave * call ale#Queue(0, 'lint_file')
+            autocmd InsertLeave * call ale#Queue(0)
         endif
     augroup END
 
@@ -278,13 +295,17 @@ function! s:ALEToggle() abort
             call ale#balloon#Enable()
         endif
     else
-        " Make sure the buffer number is a number, not a string,
-        " otherwise things can go wrong.
-        for l:buffer in map(keys(g:ale_buffer_info), 'str2nr(v:val)')
-            " Stop jobs and delete stored buffer data
-            call ale#cleanup#Buffer(l:buffer)
-            " Clear signs, loclist, quicklist
-            call ale#engine#SetResults(l:buffer, [])
+        for l:key in keys(g:ale_buffer_info)
+            " The key could be a filename or a buffer number, so try and
+            " convert it to a number. We need a number for the other
+            " functions.
+            let l:buffer = str2nr(l:key)
+
+            if l:buffer > 0
+                " Stop all jobs and clear the results for everything, and delete
+                " all of the data we stored for the buffer.
+                call ale#engine#Cleanup(l:buffer)
+            endif
         endfor
 
         " Remove highlights for the current buffer now.
@@ -306,11 +327,17 @@ if g:ale_set_balloons
     call ale#balloon#Enable()
 endif
 
+if g:ale_completion_enabled
+    call ale#completion#Enable()
+endif
+
 " Define commands for moving through warnings and errors.
 command! -bar ALEPrevious :call ale#loclist_jumping#Jump('before', 0)
 command! -bar ALEPreviousWrap :call ale#loclist_jumping#Jump('before', 1)
 command! -bar ALENext :call ale#loclist_jumping#Jump('after', 0)
 command! -bar ALENextWrap :call ale#loclist_jumping#Jump('after', 1)
+command! -bar ALEFirst :call ale#loclist_jumping#JumpToIndex(0)
+command! -bar ALELast :call ale#loclist_jumping#JumpToIndex(-1)
 
 " A command for showing error details.
 command! -bar ALEDetail :call ale#cursor#ShowCursorDetail()
@@ -338,6 +365,8 @@ nnoremap <silent> <Plug>(ale_previous) :ALEPrevious<Return>
 nnoremap <silent> <Plug>(ale_previous_wrap) :ALEPreviousWrap<Return>
 nnoremap <silent> <Plug>(ale_next) :ALENext<Return>
 nnoremap <silent> <Plug>(ale_next_wrap) :ALENextWrap<Return>
+nnoremap <silent> <Plug>(ale_first) :ALEFirst<Return>
+nnoremap <silent> <Plug>(ale_last) :ALELast<Return>
 nnoremap <silent> <Plug>(ale_toggle) :ALEToggle<Return>
 nnoremap <silent> <Plug>(ale_lint) :ALELint<Return>
 nnoremap <silent> <Plug>(ale_detail) :ALEDetail<Return>
@@ -348,7 +377,7 @@ nnoremap <silent> <Plug>(ale_fix) :ALEFix<Return>
 augroup ALECleanupGroup
     autocmd!
     " Clean up buffers automatically when they are unloaded.
-    autocmd BufUnload * call ale#cleanup#Buffer(expand('<abuf>'))
+    autocmd BufUnload * call ale#engine#Cleanup(str2nr(expand('<abuf>')))
 augroup END
 
 " Backwards Compatibility

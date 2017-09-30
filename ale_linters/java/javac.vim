@@ -14,6 +14,11 @@ function! ale_linters#java#javac#GetImportPaths(buffer) abort
         \ . 'mvn dependency:build-classpath'
     endif
 
+    let l:classpath_command = ale#gradle#BuildClasspathCommand(a:buffer)
+    if !empty(l:classpath_command)
+        return l:classpath_command
+    endif
+
     return ''
 endfunction
 
@@ -59,20 +64,23 @@ function! ale_linters#java#javac#Handle(buffer, lines) abort
     " Main.java:16: error: ';' expected
 
     let l:pattern = '\v^.*:(\d+): (.+):(.+)$'
+    let l:col_pattern = '\v^(\s*\^)$'
     let l:symbol_pattern = '\v^ +symbol: *(class|method) +([^ ]+)'
     let l:output = []
 
-    for l:match in ale#util#GetMatches(a:lines, [l:pattern, l:symbol_pattern])
-        if empty(l:match[3])
+    for l:match in ale#util#GetMatches(a:lines, [l:pattern, l:col_pattern, l:symbol_pattern])
+        if empty(l:match[2]) && empty(l:match[3])
+                let l:output[-1].col = len(l:match[1])
+        elseif empty(l:match[3])
             " Add symbols to 'cannot find symbol' errors.
-            if l:output[-1].text ==# 'error: cannot find symbol'
+            if l:output[-1].text is# 'error: cannot find symbol'
                 let l:output[-1].text .= ': ' . l:match[2]
             endif
         else
             call add(l:output, {
             \   'lnum': l:match[1] + 0,
             \   'text': l:match[2] . ':' . l:match[3],
-            \   'type': l:match[2] ==# 'error' ? 'E' : 'W',
+            \   'type': l:match[2] is# 'error' ? 'E' : 'W',
             \})
         endif
     endfor

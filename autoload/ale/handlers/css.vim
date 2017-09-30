@@ -29,7 +29,7 @@ function! ale#handlers#css#HandleCSSLintFormat(buffer, lines) abort
         \   'lnum': l:match[1] + 0,
         \   'col': l:match[2] + 0,
         \   'text': l:text,
-        \   'type': l:type ==# 'Warning' ? 'W' : 'E',
+        \   'type': l:type is# 'Warning' ? 'W' : 'E',
         \})
     endfor
 
@@ -37,19 +37,31 @@ function! ale#handlers#css#HandleCSSLintFormat(buffer, lines) abort
 endfunction
 
 function! ale#handlers#css#HandleStyleLintFormat(buffer, lines) abort
+    let l:exception_pattern = '\v^Error:'
+
+    for l:line in a:lines[:10]
+        if len(matchlist(l:line, l:exception_pattern)) > 0
+            return [{
+            \   'lnum': 1,
+            \   'text': 'stylelint exception thrown (type :ALEDetail for more information)',
+            \   'detail': join(a:lines, "\n"),
+            \}]
+        endif
+    endfor
+
     " Matches patterns line the following:
     "
     " src/main.css
     "  108:10  ✖  Unexpected leading zero         number-leading-zero
     "  116:20  ✖  Expected a trailing semicolon   declaration-block-trailing-semicolon
-    let l:pattern = '\v^.* (\d+):(\d+) \s+(\S+)\s+ (.*[^ ])\s+([^ ]+)$'
+    let l:pattern = '\v^.* (\d+):(\d+) \s+(\S+)\s+ (.*[^ ])\s+([^ ]+)\s*$'
     let l:output = []
 
     for l:match in ale#util#GetMatches(a:lines, l:pattern)
         call add(l:output, {
         \   'lnum': l:match[1] + 0,
         \   'col': l:match[2] + 0,
-        \   'type': l:match[3] ==# '✖' ? 'E' : 'W',
+        \   'type': l:match[3] is# '✖' ? 'E' : 'W',
         \   'text': l:match[4] . ' [' . l:match[5] . ']',
         \})
     endfor
